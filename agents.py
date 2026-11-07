@@ -23,7 +23,7 @@ GOAL = os.environ.get("GOAL_ID", "")
 TOKEN = os.environ.get("RUN_TOKEN", "")
 DEADLINE = time.time() + int(os.environ.get("MAX_SECONDS", "720"))       # ١٢ دقيقة وبعدين نسيب الباقي للتشغيل الجاي
 
-DEFAULTS = {"groq": "openai/gpt-oss-120b,openai/gpt-oss-20b",
+DEFAULTS = {"groq": "openai/gpt-oss-120b,qwen/qwen3.8-27b,openai/gpt-oss-20b",
             "cerebras": "gpt-oss-120b,qwen-3-235b-a22b-instruct-2507",
             "nvidia": "deepseek-ai/deepseek-v4.1-flash",
             "gemini": "gemini-3.8-flash",
@@ -90,6 +90,8 @@ def run(t: dict) -> dict:
     """أول مزوّد يرد. كله 429 ← limit. كله وقع لأسباب تانية ← error."""
     limited, errors = 0, []
     lane = LANES.get(t.get("lane"), LANES["private"])            # مش معروف ← الطريق الخاص (الأأمن)
+    prefer = [p for p in (t.get("prefer") or []) if p in lane]   # «المنارة» ممكن تقدّم مزوّد جوه نفس الطريق بس (مثلاً Gemini للكتابة)
+    lane = prefer + [p for p in lane if p not in prefer]
     for p in lane:
         if p in DEAD or not os.environ.get(KEYS[p], "").strip():
             limited += p in DEAD

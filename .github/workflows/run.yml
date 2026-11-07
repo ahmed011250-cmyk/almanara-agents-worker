@@ -1,0 +1,36 @@
+# 🤖 فريق الذكاء — «المنارة» بتصحّي التشغيل ده بس لما أحمد يبعت هدف أو يعدّل (مفيش مواعيد ثابتة: دقايق GitHub).
+# بياخد المهام من «المنارة» بتوكن مؤقت، يكلّم المزوّدين المجانيين، ويرجّع الرد. مفيش أي API مدفوع.
+name: team
+on:
+  workflow_dispatch:
+    inputs:
+      goal_id: {description: "رقم الهدف", required: true}
+      base: {description: "لينك «المنارة»", required: true}
+      token: {description: "توكن التشغيل (مؤقت)", required: true}
+concurrency:
+  group: goal-${{ inputs.goal_id }}
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: 🤖 الفريق بيشتغل
+        env:
+          GOAL_ID: ${{ inputs.goal_id }}
+          BASE: ${{ inputs.base }}
+          RUN_TOKEN: ${{ inputs.token }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GROQ_MODELS: ${{ vars.GROQ_MODELS }}
+          CEREBRAS_MODELS: ${{ vars.CEREBRAS_MODELS }}
+          NVIDIA_MODELS: ${{ vars.NVIDIA_MODELS }}
+          GEMINI_MODELS: ${{ vars.GEMINI_MODELS }}
+          OPENROUTER_MODELS: ${{ vars.OPENROUTER_MODELS }}
+        run: |
+          echo "::add-mask::$RUN_TOKEN"
+          python3 agents.py

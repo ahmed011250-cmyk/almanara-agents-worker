@@ -1,0 +1,106 @@
+name: 🎙️ تجربة صوت Habibi (عربي مفتوح المصدر)
+# تجربة بس (أحمد ٨ نوفمبر): هل Habibi يقدر يعمل فويس أوفر الريلز ببلاش بدل ElevenLabs؟
+# الموديل المصري (EGY) رخصته Apache 2.0 (تجاري مسموح). الموحّد والسعودي والإماراتي CC-BY-NC-SA ← تجربة شخصية بس،
+# ممنوع في أي ريل منشور (أحمد ٨ نوفمبر: «بجرب شخصي لحد دلوقتي»).
+on:
+  workflow_dispatch:
+    inputs:
+      dialect:
+        description: "اللهجة: SAU سعودي (تجربة شخصية بس — رخصته غير تجارية) أو EGY مصري (تجاري مسموح)"
+        required: false
+        default: "SAU"
+      text:
+        description: "النص (لو فاضي ← سطرين تجربة من سكريبت ريل)"
+        required: false
+        default: ""
+      nfe:
+        description: "خطوات التوليد (أقل = أسرع وأضعف شوية). 32 الافتراضي"
+        required: false
+        default: "32"
+      ref_url:
+        description: "لينك عينة صوت mp3/wav (٥–١٥ ثانية) — لو فاضي ← عينة مصرية جاهزة"
+        required: false
+        default: ""
+      ref_text:
+        description: "الكلام اللي في العينة بالظبط (لو حطيت لينك)"
+        required: false
+        default: ""
+permissions:
+  contents: read
+jobs:
+  tts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.cache/huggingface
+            ~/.cache/cached_path
+          key: habibi-v1
+      - name: تسطيب (torch للمعالج بس — من غير CUDA)
+        run: |
+          pip install -q torch==2.8.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+          pip install -q habibi-tts
+          sudo apt-get -qq install -y ffmpeg >/dev/null
+      - name: توليد
+        env:
+          TEXT: ${{ inputs.text }}
+          DIALECT: ${{ inputs.dialect }}
+          NFE: ${{ inputs.nfe }}
+          REF_URL: ${{ inputs.ref_url }}
+          REF_TEXT: ${{ inputs.ref_text }}
+        run: |
+          mkdir -p out
+          python3 - <<'PY'
+          import os, subprocess, time, json
+          from importlib.resources import files
+          assets = files("habibi_tts").joinpath("assets")
+          dialect = (os.environ.get("DIALECT") or "SAU").strip().upper()
+          dialect = dialect if dialect in ("SAU", "EGY") else "SAU"
+          if dialect == "SAU":     # ⚠️ CC-BY-NC-SA: تجربة شخصية بس — ممنوع في ريلز منشورة
+              ref, ref_text = str(assets.joinpath("Najdi.wav")), "تكفى طمني انا اليوم ماني بنايم ولا هو بداخل عيني النوم الين اتطمن عليه."
+          else:
+              ref, ref_text = str(assets.joinpath("EGY.mp3")), "ايه الكلام. بقولك ايه. استخدم صوتي في المحادثات. استخدمه هيعجبك اوي."
+          if os.environ.get("REF_URL"):
+              subprocess.run(["curl", "-sSL", "-o", "out/ref_in", os.environ["REF_URL"]], check=True)
+              subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", "out/ref_in", "-ac", "1", "-ar", "24000", "out/ref.wav"], check=True)
+              ref, ref_text = "out/ref.wav", os.environ.get("REF_TEXT") or ""
+          texts = {
+              "1_raw": "PLTR نزل ٦٪… والقروبات كلها تقول اهرب. ٣٠ مرة انذكر اليوم في ٨ قنوات عربية. وش رايك؟ اكتب ١ لو بايع، و٢ لو بتنتظر.",
+              "2_clean": "بالانتير نزل ستة بالمية… والقروبات كلها تقول اهرب. ثلاثين مرة انذكر اليوم في ثمان قنوات عربية. وش رايك؟ اكتب واحد لو بايع، واثنين لو بتنتظر.",
+          } if dialect == "SAU" else {
+              "1_raw": "PLTR نزل ٦٪… والجروبات كلها بتقول اهرب. ٣٠ مرة اتذكر النهارده في ٨ قنوات عربية. إنت فين؟ اكتب ١ لو بايع، و٢ لو مستني.",
+              "2_clean": "بالانتير نزل ستة في المية… والجروبات كلها بتقول اهرب. تلاتين مرة اتذكر النهارده في تمن قنوات عربية. إنت فين؟ اكتب واحد لو بايع، واتنين لو مستني.",
+          }
+          if os.environ.get("TEXT", "").strip():
+              texts = {"custom": os.environ["TEXT"].strip()}
+          report = {}
+          for name, txt in texts.items():
+              t0 = time.time()
+              subprocess.run(["habibi-tts_infer-cli", "--model", "Specialized", "--dialect", dialect, "--device", "cpu",
+                              "--ref_audio", ref, "--ref_text", ref_text, "--gen_text", txt,
+                              "--nfe_step", os.environ.get("NFE") or "32", "--output_dir", "out", "--output_file", f"{name}.wav"], check=True)
+              secs = time.time() - t0
+              dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", f"out/{name}.wav"],
+                                         capture_output=True, text=True).stdout.strip() or 0)
+              subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", f"out/{name}.wav", "-b:a", "128k", f"out/{name}.mp3"], check=True)
+              report[name] = {"dialect": dialect, "seconds_to_make": round(secs, 1), "audio_seconds": round(dur, 1), "x_realtime": round(secs / dur, 1) if dur else None}
+              print(name, report[name])
+          json.dump(report, open("out/report.json", "w"), ensure_ascii=False, indent=1)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(f"### 🎙️ Habibi ({dialect}) على المعالج\n\n| الملف | وقت التوليد | طول الصوت | أبطأ من الحقيقي بـ |\n|---|---|---|---|\n")
+              for k, v in report.items():
+                  f.write(f"| {k} | {v['seconds_to_make']} ث | {v['audio_seconds']} ث | ×{v['x_realtime']} |\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: habibi-audio
+          path: |
+            out/*.mp3
+            out/report.json
+          retention-days: 14

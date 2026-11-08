@@ -1,0 +1,25 @@
+name: 🚨 إنذار وقوع المنارة
+on:
+  schedule:
+    - cron: "*/5 * * * *"          # كل ٥ دقايق (GitHub ممكن يتأخر دقيقة أو اتنين)
+  workflow_dispatch: {}
+permissions:
+  issues: write                    # الوقعة بتتسجل Issue وبتتقفل لوحدها لما يرجع
+  contents: read
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: شيك
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ALERT_TG_TOKEN: ${{ secrets.ALERT_TG_TOKEN }}
+          ALERT_TG_CHAT: ${{ secrets.ALERT_TG_CHAT }}
+          UPTIME_URLS: ${{ vars.UPTIME_URLS }}
+          SLOW_MS: ${{ vars.SLOW_MS }}
+        run: python3 uptime.py

@@ -4,8 +4,10 @@
 (POST .../result/<task>). «المنارة» هي اللي بتقرر الخطوة اللي بعدها؛ هنا مفيش أي منطق ولا تعليمات — بس «كلّم الموديل».
 
 الطرق:
-- public (كلام أسهم وترند): Groq ← Cerebras ← NVIDIA ← Gemini ← OpenRouter
-- private (أي بيانات عملاء/موظفين، حتى بعد الإخفاء): Groq ← Cerebras بس (مابيحتفظوش بالبيانات)
+- public (كلام أسهم وترند — مفيش بيانات عملاء): طابور مرتّب من الأهم (أحمد ٨ نوفمبر: «زي طابور مرتّبين من الأهم»):
+  Gemini ← Groq ← Mistral ← Cerebras ← Z.ai ← Cloudflare ← NVIDIA ← OpenRouter
+  (الترتيب يتغيّر من غير كود: Variable اسمها LANE_PUBLIC، أسامي مفصولة بفاصلة). أي مزوّد مالوش مفتاح بيتساب.
+- private (أي بيانات عملاء/موظفين، حتى بعد الإخفاء): Groq ← Cerebras بس (مابيحتفظوش بالبيانات) — ثابت، مابيتغيّرش من Variables.
 429 حد الدقيقة ← نستنى ثواني ونعيد. الحد اليومي لكل المزوّدين ← {"limit": true} والمهمة تستنى بكرة. مفيش أي API مدفوع.
 مكتبة بايثون العادية بس (من غير pip) عشان التشغيل يخلص في ثواني ويوفّر دقايق GitHub.
 اللوج: رقم المهمة والوكيل والمزوّد والوقت بس — عمره ما بيطبع الكلام اللي اتبعت أو الرد.
@@ -28,16 +30,39 @@ DEFAULTS = {"groq": "openai/gpt-oss-120b,qwen/qwen3.8-27b,openai/gpt-oss-20b",
             "cerebras": "gpt-oss-120b,qwen-3-235b-a22b-instruct-2507",
             "nvidia": "deepseek-ai/deepseek-v4.1-flash",
             "gemini": "gemini-3.8-flash",
+            "mistral": "mistral-small-latest,mistral-medium-latest",
+            "zai": "glm-4.7-flash,glm-4.5-flash",
+            "cloudflare": "@cf/openai/gpt-oss-120b,@cf/qwen/qwen3-30b-a3b-fp8",
             "openrouter": ""}
 OPENAI_URLS = {"groq": os.environ.get("GROQ_URL", "https://api.groq.com/openai/v1/chat/completions"),
                "cerebras": os.environ.get("CEREBRAS_URL", "https://api.cerebras.ai/v1/chat/completions"),
                "nvidia": os.environ.get("NVIDIA_URL", "https://integrate.api.nvidia.com/v1/chat/completions"),
-               "openrouter": os.environ.get("OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions")}
+               "openrouter": os.environ.get("OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions"),
+               "mistral": os.environ.get("MISTRAL_URL", "https://api.mistral.ai/v1/chat/completions"),
+               "zai": os.environ.get("ZAI_URL", "https://api.z.ai/api/paas/v4/chat/completions"),
+               "cloudflare": os.environ.get("CLOUDFLARE_URL") or (
+                   f"https://api.cloudflare.com/client/v4/accounts/{os.environ.get('CLOUDFLARE_ACCOUNT_ID', '').strip()}/ai/v1/chat/completions")}
 GEMINI_URL = os.environ.get("GEMINI_URL", "https://generativelanguage.googleapis.com/v1beta/models/")
-LANES = {"public": ["groq", "cerebras", "nvidia", "gemini", "openrouter"], "private": ["groq", "cerebras"]}
-JSON_MODE = {"groq", "cerebras"}
+PUBLIC_ORDER = ["gemini", "groq", "mistral", "cerebras", "zai", "cloudflare", "nvidia", "openrouter"]
+PRIVATE_ONLY = ["groq", "cerebras"]                     # 🔒 مابيتغيّرش من بره
 KEYS = {"groq": "GROQ_API_KEY", "cerebras": "CEREBRAS_API_KEY", "nvidia": "NVIDIA_API_KEY",
-        "gemini": "GEMINI_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
+        "gemini": "GEMINI_API_KEY", "openrouter": "OPENROUTER_API_KEY", "mistral": "MISTRAL_API_KEY",
+        "zai": "ZAI_API_KEY", "cloudflare": "CLOUDFLARE_API_TOKEN"}
+
+
+def public_lane() -> list[str]:
+    custom = [p.strip().lower() for p in (os.environ.get("LANE_PUBLIC") or "").split(",") if p.strip().lower() in KEYS]
+    return list(dict.fromkeys(custom)) or PUBLIC_ORDER
+
+
+LANES = {"public": public_lane(), "private": PRIVATE_ONLY}
+
+
+def has_key(p: str) -> bool:
+    if p == "cloudflare" and not os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip():
+        return False
+    return bool(os.environ.get(KEYS[p], "").strip())
+JSON_MODE = {"groq", "cerebras", "mistral", "zai"}
 DEAD: set[str] = set()          # مزوّد خلص حده **اليومي** (كل موديلاته) ← مانجرّبوش تاني في التشغيل ده
 DEAD_M: set[tuple[str, str]] = set()   # موديل بعينه خلص حده اليومي
 
@@ -122,7 +147,7 @@ def run(t: dict) -> dict:
     while True:
         errors, waits = [], []
         for p in lane:
-            if p in DEAD or not os.environ.get(KEYS[p], "").strip():
+            if p in DEAD or not has_key(p):
                 continue
             for m in models_of(p):
                 if (p, m) in DEAD_M:
@@ -152,8 +177,8 @@ def run(t: dict) -> dict:
                 time.sleep(nap)                                   # حد الدقيقة ← نستنى ونعيد
                 continue
             return {"error": "حد الدقيقة والوقت خلص — هتكمّل في التشغيل الجاي"}
-        live = [p for p in lane if p not in DEAD and os.environ.get(KEYS[p], "").strip()]
-        if not live and any(os.environ.get(KEYS[p], "").strip() for p in lane):
+        live = [p for p in lane if p not in DEAD and has_key(p)]
+        if not live and any(has_key(p) for p in lane):
             return {"limit": True}
         if errors:
             return {"error": "؛ ".join(errors)[:300]}
@@ -180,7 +205,7 @@ def main() -> int:
         print(f"• مهمة {t['id']} ({t['agent']}): {res.get('provider') or ('حد' if res.get('limit') else 'غلط')} "
               f"{res.get('secs', '')}ث ← {code}")
         done += 1
-        if res.get("limit") and not [p for p in LANES.get(t.get("lane"), LANES["private"]) if p not in DEAD and os.environ.get(KEYS[p])]:
+        if res.get("limit") and not [p for p in LANES.get(t.get("lane"), LANES["private"]) if p not in DEAD and has_key(p)]:
             print("🌙 كل المزوّدين خلصوا — الباقي بكرة")
             return 0
     print("⏱ الوقت خلص — الباقي في التشغيل الجاي")

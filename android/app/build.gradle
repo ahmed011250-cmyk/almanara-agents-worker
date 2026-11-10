@@ -1,0 +1,41 @@
+// 📲 تطبيق «المنارة» للأندرويد (أحمد ١٠ نوفمبر: «لينك واحد و عاوزه apk»)
+// ده غلاف (Trusted Web Activity) حوالين pro.almanara.info — نفس التطبيق بالظبط، بأيقونة وبيفتح ملء الشاشة.
+// أي تعديل في الموقع بيظهر في التطبيق على طول من غير ما نبني APK تاني.
+plugins { id "com.android.application" }
+
+def ks = System.getenv("ANDROID_KEYSTORE")
+android {
+    namespace "info.almanara.pro"
+    compileSdk 34
+    defaultConfig {
+        applicationId "info.almanara.pro"
+        minSdk 21
+        targetSdk 34
+        versionCode((System.getenv("APP_VERSION_CODE") ?: "1") as int)
+        versionName "1." + (System.getenv("APP_VERSION_CODE") ?: "1")
+    }
+    signingConfigs {
+        release {
+            if (ks) {
+                storeFile file(ks)
+                storePassword System.getenv("ANDROID_KEY_PASS")
+                keyAlias "almanara"
+                keyPassword System.getenv("ANDROID_KEY_PASS")
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation "com.google.androidbrowserhelper:androidbrowserhelper:2.5.0"
+}

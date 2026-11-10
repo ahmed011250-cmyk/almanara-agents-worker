@@ -1,0 +1,86 @@
+# 📲 APK «المنارة» للأندرويد (أحمد ١٠ نوفمبر: «لينك واحد و عاوزه apk» ثم «اعمل كل حاجه»)
+#
+# غلاف Trusted Web Activity حوالين pro.almanara.info — نفس التطبيق، بأيقونة وملء الشاشة وإشعارات.
+# بيتبني لما حد يدوس «Run workflow». الـ APK بيتنشر هنا:
+#   https://github.com/ahmed011250-cmyk/almanara-agents-worker/releases/download/android-app/almanara.apk
+# وصفحة pro.almanara.info/app/android بتحوّل عليه.
+#
+# 🔐 مفتاح التوقيع: أول مرة بيتعمل جوه الشغل نفسه، وبيتحفظ **متشفّر** بـ ANDROID_KEY_PASS
+#    (أحمد بيحطه بنفسه في Secrets) في release اسمه android-key. محدش بيشوفه ولا بيطبعه.
+#    ⚠️ متمسحش الـ release ده ولا تغيّر ANDROID_KEY_PASS — من غيرهم مفيش تحديث للتطبيق على موبايلات العملاء.
+name: 📲 APK المنارة
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ANDROID_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
+      GH_TOKEN: ${{ github.token }}
+      APP_VERSION_CODE: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 🔐 المفتاح موجود؟
+        run: |
+          if [ "${#ANDROID_KEY_PASS}" -lt 16 ]; then
+            echo "::error::ضيف ANDROID_KEY_PASS (١٦ حرف على الأقل، إنجليزي وأرقام) في Settings ← Secrets ← Actions بتاعة الريبو"
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: 🔐 مفتاح التوقيع (مرة واحدة، ومتشفّر)
+        run: |
+          set -e
+          K="$RUNNER_TEMP/k"; mkdir -p "$K"; KS="$K/almanara.jks"
+          if gh release download android-key -p android-key.enc -D "$K" 2>/dev/null; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:ANDROID_KEY_PASS -in "$K/android-key.enc" -out "$KS"
+            echo "اتجاب المفتاح القديم ✅"
+          else
+            keytool -genkeypair -noprompt -keystore "$KS" -storetype PKCS12 -alias almanara -keyalg RSA -keysize 2048 \
+              -validity 10000 -storepass:env ANDROID_KEY_PASS -keypass:env ANDROID_KEY_PASS -dname "CN=Al-Manara, O=Al-Manara, C=SA"
+            openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:ANDROID_KEY_PASS -in "$KS" -out "$K/android-key.enc"
+            gh release create android-key "$K/android-key.enc" --title "🔐 مفتاح توقيع التطبيق (متشفّر)" \
+              --notes "متشفّر بـ ANDROID_KEY_PASS. ⚠️ متمسحوش — من غيره مش هنقدر نحدّث تطبيق المنارة على موبايلات العملاء."
+            echo "اتعمل مفتاح جديد واتحفظ متشفّر ✅"
+          fi
+          echo "ANDROID_KEYSTORE=$KS" >> "$GITHUB_ENV"
+
+      - name: 🏗️ بناء الـ APK
+        run: gradle -p android --no-daemon assembleRelease
+
+      - name: 🔗 البصمة (assetlinks.json)
+        run: |
+          set -e
+          FP=$(keytool -list -v -keystore "$ANDROID_KEYSTORE" -alias almanara -storepass:env ANDROID_KEY_PASS \
+               | sed -n 's/^[[:space:]]*SHA256:[[:space:]]*//p' | head -1)
+          test -n "$FP"
+          printf '[{"relation":["delegate_permission/common.handle_all_urls"],"target":{"namespace":"android_app","package_name":"info.almanara.pro","sha256_cert_fingerprints":["%s"]}}]\n' "$FP" > assetlinks.json
+          cp android/app/build/outputs/apk/release/app-release.apk almanara.apk
+          echo "### 📲 APK المنارة — نسخة 1.${APP_VERSION_CODE}" >> "$GITHUB_STEP_SUMMARY"
+          echo "بصمة التوقيع (عامة، مش سر): \`$FP\`" >> "$GITHUB_STEP_SUMMARY"
+          ls -la almanara.apk
+
+      - name: 🚀 نشر
+        run: |
+          gh release view android-app >/dev/null 2>&1 || gh release create android-app --title "📲 تطبيق المنارة للأندرويد" \
+            --notes "نزّل almanara.apk على موبايل أندرويد ← افتحه ← «تثبيت». أو من pro.almanara.info/app/android"
+          gh release upload android-app almanara.apk assetlinks.json --clobber
